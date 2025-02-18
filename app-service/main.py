@@ -35,6 +35,20 @@ while True:
         st.session_state["semantic_score"].append(data["semantic_score"])
         st.session_state["comment_count"].append(data["comment_count"])
 
+        with chart_holder1:
+            chart_holder1.line_chart(
+                st.session_state["semantic_score"],
+                use_container_width=True,
+                x_label="Semantic score",
+            )
+
+        with chart_holder2:
+            chart_holder2.line_chart(
+                st.session_state["comment_count"],
+                use_container_width=True,
+                x_label="Count comment",
+            )
+
         with col1:
             st.metric(
                 label="Current Semantic Score",

@@ -65,6 +65,9 @@ class CommentDB:
         current_time = int(time.time())
         two_minutes_ago = current_time - 60 * 2
 
+        self.cursor.execute("SELECT COUNT(*) FROM comments")
+        comment_count = self.cursor.fetchone()[0]
+
         self.cursor.execute(
             """
             SELECT weighted_score FROM comments 
@@ -73,10 +76,9 @@ class CommentDB:
             (two_minutes_ago,),
         )
         scores = self.cursor.fetchall()
-        comment_count = len(scores)
 
         if scores:
-            average_score = sum(score[0] for score in scores) / comment_count
+            average_score = sum(score[0] for score in scores) / len(scores)
             return {"semantic_score": average_score, "comment_count": comment_count}
         else:
             return {"semantic_score": 0, "comment_count": 0}

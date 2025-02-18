@@ -1,0 +1,150 @@
+version: "3"
+
+services:
+  preprocessor_kafka:
+    hostname: "preprocessor_kafka"
+    image: "bitnami/kafka:latest"
+    ports:
+      - "9097:9097"
+      - "9095:9095"
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@preprocessor_kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9097,CONTROLLER://:9093,EXTERNAL://:9095
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://preprocessor_kafka:9097,EXTERNAL://localhost:9095
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics.sh",
+          "--bootstrap-server",
+          "localhost:9097",
+          "--list",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 50
+
+  kafka:
+    hostname: "kafka"
+    image: "bitnami/kafka:latest"
+    ports:
+      - "9098:9098"
+      - "9096:9096"
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9094
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9098,CONTROLLER://:9094,EXTERNAL://:9096
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9098,EXTERNAL://localhost:9096
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics.sh",
+          "--bootstrap-server",
+          "localhost:9098",
+          "--list",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 50
+
+  comment_service:
+    build:
+      context: ./comments-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - ./comments-service/data:/app/data
+    environment:
+      - BOOTSTRAP_SERVERS=preprocessor_kafka:9097
+      - TOPIC=new_comment
+    depends_on:
+      preprocessor_kafka:
+        condition: service_healthy
+
+  preprocessor_service:
+    build:
+      context: ./comment-processor-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - INPUT_BOOTSTRAP_SERVERS=preprocessor_kafka:9097
+      - INPUT_TOPIC=new_comment
+      - OUTPUT_BOOTSTRAP_SERVERS=kafka:9098
+      - OUTPUT_TOPIC=processed_comment
+    depends_on:
+      preprocessor_kafka:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  like_service:
+    build:
+      context: ./likes-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - comment_data:/app/data
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9098
+      - TOPIC=new_like
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  reply_service:
+    build:
+      context: ./replies-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - comment_data:/app/data
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9098
+      - TOPIC=new_reply
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  sentiment_analysis_service:
+    build:
+      context: ./sentiment-analysis-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9098
+      - COMMENTS_TOPIC=processed_comment
+      - LIKES_TOPIC=new_like
+      - REPLIES_TOPIC=new_reply
+      - OUTPUT_TOPIC=broadcast_data
+    volumes:
+      - comment_data:/app/data
+    depends_on:
+      preprocessor_kafka:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  app_service:
+    build:
+      context: ./app-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9098
+      - TOPIC=broadcast_data
+    ports:
+      - "8501:8501"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+volumes:
+  comment_data:
